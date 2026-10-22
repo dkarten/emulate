@@ -48,19 +48,11 @@ describe('Concurrent Webhook Delivery', () => {
 
   beforeAll(async () => {
     receiver = await startWebhookReceiver();
-    emulator = await createEmulator({ port: 0 });
-
-    // Register webhook endpoint
-    await fetch(`${emulator.url}/webhook_endpoints`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${emulator.apiKey}`,
-      },
-      body: JSON.stringify({
-        endpoint_url: receiver.url,
-        events: [],
-      }),
+    // Seeded, not registered over the API: an empty `events` list (every event) is a seed-only
+    // convenience — `POST /webhook_endpoints` requires at least one event, as production does.
+    emulator = await createEmulator({
+      port: 0,
+      seed: { webhookEndpoints: [{ endpoint_url: receiver.url, events: [] }] },
     });
   });
 
@@ -229,7 +221,7 @@ describe('Concurrent Webhook Delivery', () => {
       },
       body: JSON.stringify({
         endpoint_url: failingReceiver.url,
-        events: [],
+        events: ['user.created'],
       }),
     });
     expect(res.status).toBe(201);

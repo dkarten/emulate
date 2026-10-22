@@ -6,7 +6,9 @@ import { createHmac } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createEmulator } from '../dist/index.js';
 
-const webhookSecret = 'node_compat_webhook_secret';
+// Assigned from the endpoint the API returns: the signing secret is generated server-side, as in
+// production, and a `secret` in the create body is ignored.
+let webhookSecret;
 
 const receiver = await startWebhookReceiver();
 let emulator;
@@ -38,10 +40,11 @@ try {
     body: JSON.stringify({
       endpoint_url: receiver.url,
       events: ['user.created'],
-      secret: webhookSecret,
     }),
   });
   assert.equal(endpointResponse.status, 201);
+  webhookSecret = (await endpointResponse.json()).secret;
+  assert.equal(typeof webhookSecret, 'string');
 
   const email = 'node-compat@example.com';
   const userResponse = await api('/user_management/users', {

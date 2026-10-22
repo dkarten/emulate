@@ -101,6 +101,96 @@ describe('Authorization org role routes', () => {
     expect(body.data[0].slug).toBe('r1');
   });
 
+  it('lists the environment roles that apply to the org too, shadowed by its own, in priority order', async () => {
+    const org = await createOrg('Applies Org');
+    const other = await createOrg('Other Org');
+    await req('/authorization/roles', {
+      method: 'POST',
+      body: JSON.stringify({ slug: 'member', name: 'Member', priority: 0 }),
+    });
+    await req('/authorization/roles', {
+      method: 'POST',
+      body: JSON.stringify({ slug: 'admin', name: 'Admin', priority: 1 }),
+    });
+    await req(`/authorization/organizations/${org.id}/roles`, {
+      method: 'POST',
+      body: JSON.stringify({ slug: 'reviewer', name: 'Reviewer', priority: 2 }),
+    });
+    await req(`/authorization/organizations/${org.id}/roles`, {
+      method: 'POST',
+      body: JSON.stringify({ slug: 'admin', name: 'Applies admin', priority: 1 }),
+    });
+    await req(`/authorization/organizations/${other.id}/roles`, {
+      method: 'POST',
+      body: JSON.stringify({ slug: 'outsider', name: 'Outsider', priority: 0 }),
+    });
+
+    const body = await json(await req(`/authorization/organizations/${org.id}/roles`));
+
+    expect(body.data.map((r: any) => [r.slug, r.type])).toEqual([
+      ['member', 'EnvironmentRole'],
+      ['admin', 'OrganizationRole'],
+      ['reviewer', 'OrganizationRole'],
+    ]);
+    expect(body.data[1].name).toBe('Applies admin');
+  });
+
+  it('lists a seeded organization-owned role as the org override, the way memberships resolve it', async () => {
+    const org = await createOrg('Seeded Org');
+    await req('/authorization/roles', {
+      method: 'POST',
+      body: JSON.stringify({ slug: 'admin', name: 'Admin', priority: 0 }),
+    });
+    // A seeded role carries an organization_id with the type defaulted to EnvironmentRole.
+    getWorkOSStore(store).roles.insert({
+      object: 'role',
+      slug: 'admin',
+      name: 'Seeded admin',
+      description: null,
+      type: 'EnvironmentRole',
+      organization_id: org.id,
+      is_default_role: false,
+      priority: 0,
+      resource_type_slug: 'organization',
+    });
+
+    const body = await json(await req(`/authorization/organizations/${org.id}/roles`));
+
+    expect(body.data.map((r: any) => r.name)).toEqual(['Seeded admin']);
+  });
+
+  it('returns every applying role in one unpaged list', async () => {
+    const org = await createOrg('Many Roles Org');
+    for (let i = 0; i < 12; i++) {
+      await req('/authorization/roles', {
+        method: 'POST',
+        body: JSON.stringify({ slug: `env-${i}`, name: `Env ${i}`, priority: i }),
+      });
+    }
+    await req(`/authorization/organizations/${org.id}/roles`, {
+      method: 'POST',
+      body: JSON.stringify({ slug: 'own', name: 'Own', priority: 99 }),
+    });
+
+    const body = await json(await req(`/authorization/organizations/${org.id}/roles`));
+
+    expect(body.data.length).toBe(13);
+    expect(body.data[12].slug).toBe('own');
+    expect(body.list_metadata).toEqual({ before: null, after: null });
+  });
+
+  it('answers 404 for an unknown organization rather than the environment roles', async () => {
+    await req('/authorization/roles', {
+      method: 'POST',
+      body: JSON.stringify({ slug: 'member', name: 'Member' }),
+    });
+
+    const res = await req('/authorization/organizations/org_does_not_exist/roles');
+
+    expect(res.status).toBe(404);
+    expect((await json(res)).message).toBe('Organization not found');
+  });
+
   it('gets an org role by slug', async () => {
     const org = await createOrg('Get Org');
     await req(`/authorization/organizations/${org.id}/roles`, {

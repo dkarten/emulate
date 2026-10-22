@@ -42,6 +42,24 @@ export function resolvePrimaryRole(ws: WorkOSStore, organizationId: string, slug
   );
 }
 
+/**
+ * The roles that apply to an organization, the way production lists them: every environment
+ * role plus the organization's own, an organization role shadowing an environment role with
+ * the same slug, in priority order. Equal priorities keep environment roles ahead of the
+ * organization's, each in insertion order, since Array.prototype.sort is stable. The
+ * organization's roles are matched on organization_id, as resolvePrimaryRole does: a seeded
+ * role can carry an organization_id with its type defaulted to EnvironmentRole, and it is
+ * still that organization's override.
+ */
+export function rolesApplyingTo(ws: WorkOSStore, organizationId: string): WorkOSRole[] {
+  const own = ws.roles.findBy('organization_id', organizationId);
+  const shadowed = new Set(own.map((r) => r.slug));
+  const environment = ws.roles
+    .all()
+    .filter((r) => r.type === 'EnvironmentRole' && r.organization_id === null && !shadowed.has(r.slug));
+  return [...environment, ...own].sort((a, b) => a.priority - b.priority);
+}
+
 export function requireEnvRole(ws: WorkOSStore, slug: string): WorkOSRole {
   const role = findEnvRole(ws, slug);
   if (!role) throw notFound('Role');
@@ -120,7 +138,13 @@ export interface RoleRouteConfig {
   roleType: 'EnvironmentRole' | 'OrganizationRole';
   requireRole: (ws: WorkOSStore, c: Context) => WorkOSRole;
   findRole: (ws: WorkOSStore, c: Context, slug: string) => WorkOSRole | undefined;
-  listFilter: (c: Context) => (r: WorkOSRole) => boolean;
+  /** Narrows the paged GET to the roles table rows it serves. Unused when listRoles is set. */
+  listFilter?: (c: Context) => (r: WorkOSRole) => boolean;
+  /**
+   * The whole list the GET answers with, when production's list is not a filtered page of
+   * the roles table: the spec's RoleList is unpaged and in priority order. Replaces listFilter.
+   */
+  listRoles?: (ws: WorkOSStore, c: Context) => WorkOSRole[];
   insertDefaults: (c: Context) => Partial<WorkOSRole>;
   duplicateMessage: string;
   /** Spec error code for a taken slug: `role_slug_conflict` or `organization_role_slug_conflict`. */
@@ -179,12 +203,20 @@ export function registerRoleRoutes(ctx: RouteContext, config: RoleRouteConfig): 
   });
 
   app.get(pathPrefix, (c) => {
+    if (config.listRoles) {
+      return c.json({
+        object: 'list',
+        data: config.listRoles(ws, c).map((r) => formatRole(r, ws)),
+        list_metadata: { before: null, after: null },
+      });
+    }
+
     const url = new URL(c.req.url);
     const params = parseListParams(url);
 
     const result = ws.roles.list({
       ...params,
-      filter: config.listFilter(c),
+      filter: config.listFilter?.(c),
     });
 
     return c.json(formatListResponse(result, (r) => formatRole(r, ws)));

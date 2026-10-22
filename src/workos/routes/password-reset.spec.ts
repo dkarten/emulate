@@ -33,7 +33,7 @@ describe('Password reset routes', () => {
     const user = await json(
       await req('/user_management/users', {
         method: 'POST',
-        body: JSON.stringify({ email: 'reset@test.com', password: 'oldpassword', email_verified: true }),
+        body: JSON.stringify({ email: 'reset@test.com', password: 'correct-horse-battery', email_verified: true }),
       }),
     );
     const reset = await json(
@@ -144,7 +144,7 @@ describe('Password reset routes', () => {
 
     const confirmRes = await req('/user_management/password_reset/confirm', {
       method: 'POST',
-      body: JSON.stringify({ token: reset.password_reset_token, new_password: 'newpassword' }),
+      body: JSON.stringify({ token: reset.password_reset_token, new_password: 'an even better passphrase' }),
     });
     expect(confirmRes.status).toBe(200);
 
@@ -155,19 +155,153 @@ describe('Password reset routes', () => {
     const authRes = await app.request('/user_management/authenticate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'password', email: 'reset@test.com', password: 'newpassword' }),
+      body: JSON.stringify({ grant_type: 'password', email: 'reset@test.com', password: 'an even better passphrase' }),
     });
     expect(authRes.status).toBe(200);
   });
 
-  it('rejects an invalid token without emitting password_reset.succeeded', async () => {
+  // Production looks the user up by the token, so a token it never issued is a 404 for the user.
+  it('404s an unknown token without emitting password_reset.succeeded', async () => {
     await createUserAndRequestReset();
 
     const confirmRes = await req('/user_management/password_reset/confirm', {
       method: 'POST',
-      body: JSON.stringify({ token: 'bogus', new_password: 'newpassword' }),
+      body: JSON.stringify({ token: 'bogus', new_password: 'an even better passphrase' }),
+    });
+    expect(confirmRes.status).toBe(404);
+    expect(await json(confirmRes)).toEqual({
+      message: "Could not locate user with provided token: 'bogus'",
+      code: 'password_reset_token_not_found',
+    });
+    expect(eventsNamed('password_reset.succeeded')).toHaveLength(0);
+  });
+
+  it('issues a token that lasts 15 minutes, as production does', async () => {
+    const { reset } = await createUserAndRequestReset();
+    const ttl = new Date(reset.expires_at).getTime() - new Date(reset.created_at).getTime();
+    expect(ttl).toBeGreaterThan(14 * 60 * 1000);
+    expect(ttl).toBeLessThanOrEqual(15 * 60 * 1000);
+  });
+
+  it('reports an expired token inside password_reset_error', async () => {
+    const { reset } = await createUserAndRequestReset();
+    const stored = getWorkOSStore(store).passwordResets.get(reset.id)!;
+    getWorkOSStore(store).passwordResets.update(stored.id, { expires_at: new Date(Date.now() - 1000).toISOString() });
+
+    const confirmRes = await req('/user_management/password_reset/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token: reset.password_reset_token, new_password: 'an even better passphrase' }),
     });
     expect(confirmRes.status).toBe(400);
+    expect(await json(confirmRes)).toEqual({
+      message: 'Could not reset password.',
+      code: 'password_reset_error',
+      errors: [{ code: 'password_reset_token_expired', message: 'The password reset token has expired.' }],
+    });
     expect(eventsNamed('password_reset.succeeded')).toHaveLength(0);
+  });
+
+  // The reset applies the same policy as user creation; its failures ride in the reset's own
+  // error, after an expired token when both apply.
+  it('holds the new password to the password policy', async () => {
+    const { reset } = await createUserAndRequestReset();
+
+    const confirmRes = await req('/user_management/password_reset/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token: reset.password_reset_token, new_password: 'password123' }),
+    });
+    expect(confirmRes.status).toBe(400);
+    const body = await json(confirmRes);
+    expect(body.code).toBe('password_reset_error');
+    expect(body.errors.map((e: any) => e.code)).toEqual(['password_too_weak']);
+
+    // The token survives a refused attempt, so a stronger password still goes through.
+    const retry = await req('/user_management/password_reset/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token: reset.password_reset_token, new_password: 'an even better passphrase' }),
+    });
+    expect(retry.status).toBe(200);
+  });
+
+  it('signs the user out everywhere: a live session and its refresh token stop working', async () => {
+    const { user, reset } = await createUserAndRequestReset();
+    const authenticate = (body: Record<string, unknown>) =>
+      app.request('/user_management/authenticate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const signedIn = await json(
+      await authenticate({ grant_type: 'password', email: user.email, password: 'correct-horse-battery' }),
+    );
+    expect(signedIn.refresh_token).toBeDefined();
+    const ws = getWorkOSStore(store);
+    const [session] = ws.sessions.findBy('user_id', user.id);
+    expect(session).toBeDefined();
+    // An agent session delegated from that sign-in, as a user_delegated mint chains one to the
+    // backing user session; minting one for real needs a blueprint, instance and token exchange,
+    // so the row is written directly with the link the revocation walks.
+    const delegated = ws.agentInstanceSessions.insert({
+      object: 'agent_instance_session',
+      agent_instance_id: 'agent_instance_delegated',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      revoked_at: null,
+      refresh_token: 'agent-refresh-token',
+      parent_session_id: null,
+      user_session_id: session.id,
+      permissions: [],
+      intent: null,
+    });
+
+    const confirmRes = await req('/user_management/password_reset/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token: reset.password_reset_token, new_password: 'an even better passphrase' }),
+    });
+    expect(confirmRes.status).toBe(200);
+
+    // The session is ended the way a revoke ends it, so its refresh token is refused like an
+    // unknown one, the agent session delegated from it is revoked with it, and the old password
+    // no longer signs in.
+    expect(ws.sessions.findBy('user_id', user.id)).toHaveLength(0);
+    expect(eventsNamed('session.revoked')).toHaveLength(1);
+    expect(ws.agentInstanceSessions.get(delegated.id)!.revoked_at).not.toBeNull();
+    const refreshed = await authenticate({ grant_type: 'refresh_token', refresh_token: signedIn.refresh_token });
+    expect(refreshed.status).toBe(400);
+    expect((await json(refreshed)).error).toBe('invalid_grant');
+    const oldPassword = await authenticate({
+      grant_type: 'password',
+      email: user.email,
+      password: 'correct-horse-battery',
+    });
+    expect(oldPassword.status).toBe(400);
+    expect((await json(oldPassword)).code).toBe('invalid_credentials');
+  });
+
+  it('spends the token and verifies the email', async () => {
+    const user = await json(
+      await req('/user_management/users', {
+        method: 'POST',
+        body: JSON.stringify({ email: 'unverified@test.com', password: 'correct-horse-battery' }),
+      }),
+    );
+    expect(user.email_verified).toBe(false);
+    const reset = await json(
+      await req('/user_management/password_reset', { method: 'POST', body: JSON.stringify({ email: user.email }) }),
+    );
+
+    const confirmRes = await req('/user_management/password_reset/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token: reset.password_reset_token, new_password: 'an even better passphrase' }),
+    });
+    expect(confirmRes.status).toBe(200);
+    // Production serializes the user it looked up by the token, so the response predates the reset.
+    expect((await json(confirmRes)).user).toMatchObject({ object: 'user', id: user.id, email_verified: false });
+    expect((await json(await req(`/user_management/users/${user.id}`))).email_verified).toBe(true);
+
+    const replay = await req('/user_management/password_reset/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token: reset.password_reset_token, new_password: 'an even better passphrase' }),
+    });
+    expect(replay.status).toBe(404);
   });
 });

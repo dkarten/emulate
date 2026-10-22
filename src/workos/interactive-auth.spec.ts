@@ -418,7 +418,7 @@ describe('Interactive Auth Mode with the password step', () => {
     expect(emulator.store.getData(loginKey(tokenIn(await next.text())))).toBeDefined();
   });
 
-  it('sweeps the verification an abandoned email page was waiting on, along with its token', async () => {
+  it("sweeps an abandoned email page's token but leaves the user's code, which a later login may hold", async () => {
     const ws = getWorkOSStore(emulator.store);
     const token = tokenIn(await (await submit({ email: 'unverified@example.com', password: 'correct-horse' })).text());
     expect(token).not.toBe('');
@@ -427,10 +427,11 @@ describe('Interactive Auth Mode with the password step', () => {
     const stored = emulator.store.getData<{ expires_at: string }>(loginKey(token));
     emulator.store.setData(loginKey(token), { ...stored, expires_at: new Date(Date.now() - 1000).toISOString() });
 
-    // The sweep at the next mint takes the record the gate was waiting on along with the token.
+    // The sweep at the next mint takes the token. The code is the user's one current code, not
+    // the login's — issuing another replaces it — so it is left for whichever login verifies it.
     expect((await submit({ email: 'multi@example.com', password: 'correct-horse' })).status).toBe(200);
     expect(emulator.store.getData(loginKey(token))).toBeUndefined();
-    expect(ws.emailVerifications.get(verificationId)).toBeUndefined();
+    expect(ws.emailVerifications.get(verificationId)).toBeDefined();
   });
 
   it('sweeps the challenge an abandoned one-time-code page was waiting on, along with its token', async () => {
@@ -527,7 +528,10 @@ describe('Interactive Auth Mode with the password step', () => {
     const failed = authEvents().slice(before);
     expect(failed).toHaveLength(1);
     expect(failed[0].event).toBe('authentication.email_verification_failed');
-    expect(failed[0].data).toMatchObject({ email: 'unverified@example.com', error: { code: 'invalid_code' } });
+    expect(failed[0].data).toMatchObject({
+      email: 'unverified@example.com',
+      error: { code: 'invalid_one_time_code', message: 'Invalid one-time code' },
+    });
     // The same code is still waiting; a wrong guess does not reissue it.
     expect(emailCodeFor(token)).toMatch(/^\d{6}$/);
   });
@@ -562,6 +566,37 @@ describe('Interactive Auth Mode with the password step', () => {
     expect(again.status).toBe(302);
   });
 
+  // The page compares the user's latest code, as the grant and the confirm endpoint do: a code
+  // sent since the page sent its own retires the page's, and the code it accepts is redeemed
+  // rather than dropped, so a replay of it anywhere reads as previously used.
+  it("verifies the user's latest code, not only the one the page sent", async () => {
+    await createUser('resent@example.com', { password: 'correct-horse-battery-staple' });
+    const token = tokenIn(
+      await (await submit({ email: 'resent@example.com', password: 'correct-horse-battery-staple' })).text(),
+    );
+    const ws = getWorkOSStore(emulator.store);
+    // Known codes, since two random six-digit codes can coincide.
+    ws.emailVerifications.update(loginFor(token)!.email_verification_id!, { code: '111111' });
+
+    // A newer code, sent the way an app would: it retires the page's.
+    const userId = ws.users.findOneBy('email', 'resent@example.com')!.id;
+    const sent = await fetch(`${emulator.url}/user_management/users/${userId}/email_verification/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${emulator.apiKey}` },
+    });
+    const newer = (await sent.json()) as { id: string };
+    ws.emailVerifications.update(newer.id, { code: '222222' });
+
+    const stale = await submit({ email: 'resent@example.com', pending_authentication_token: token, code: '111111' });
+    expect(stale.status).toBe(401);
+
+    const res = await submit({ email: 'resent@example.com', pending_authentication_token: token, code: '222222' });
+    expect(res.status).toBe(302);
+    const redeemed = ws.emailVerifications.get(newer.id)!;
+    expect(redeemed.verified_at).toEqual(expect.any(String));
+    expect(redeemed.attempts).toBe(2);
+  });
+
   it('asks a user with an enrolled factor for the one-time code after the password', async () => {
     const res = await submit({ email: 'mfa@example.com', password: 'correct-horse' });
     expect(res.status).toBe(200);
@@ -590,7 +625,10 @@ describe('Interactive Auth Mode with the password step', () => {
     const failed = authEvents().slice(before);
     expect(failed).toHaveLength(1);
     expect(failed[0].event).toBe('authentication.mfa_failed');
-    expect(failed[0].data).toMatchObject({ email: 'mfa@example.com', error: { code: 'invalid_one_time_code' } });
+    expect(failed[0].data).toMatchObject({
+      email: 'mfa@example.com',
+      error: { code: 'invalid_one_time_code', message: 'Invalid one-time code' },
+    });
   });
 
   it('mints a code after the right one-time code; the exchange reports what the mfa-totp grant would', async () => {

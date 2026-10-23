@@ -4,6 +4,8 @@ export const STORE_KEYS = {
   eventBus: 'eventBus',
   apiKeyMap: 'apiKeyMap',
   jwtTemplate: 'jwt_template',
+  /** The seed's `sessionSettings`: production's Sessions tab, which has no API of its own. */
+  sessionSettings: 'session_settings',
   interactiveAuth: 'interactiveAuth',
   /** Set alongside interactiveAuth when the AuthKit login page should also ask for a password. */
   interactivePassword: 'interactivePassword',
@@ -30,6 +32,20 @@ export const STORE_KEY_PREFIXES = {
  * spec-required `resource_type_slug`.
  */
 export const DEFAULT_RESOURCE_TYPE_SLUG = 'organization';
+
+/**
+ * Lifetime of the access token `/user_management/authenticate` mints when the seed's
+ * `sessionSettings` sets none: five minutes, the default "Access token duration" on an
+ * application's Sessions tab in the dashboard. The refresh token carries the session past it.
+ */
+export const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 300;
+
+/**
+ * Technical ceiling on a seeded access-token lifetime, not a production limit: it keeps `exp`
+ * a safe integer once the current time is added, so the signed value is exactly the requested
+ * lifetime. The 32-bit figure is otherwise arbitrary; nothing a test wants is anywhere near it.
+ */
+export const MAX_ACCESS_TOKEN_TTL_SECONDS = 2 ** 31 - 1;
 
 /**
  * `resource_type_slug` is optional wherever the emulator accepts it (create

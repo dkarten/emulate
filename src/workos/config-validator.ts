@@ -3,7 +3,12 @@
  */
 import type { WorkOSSeedConfig } from './index.js';
 import { validateJwtTemplateContent } from './jwt-template.js';
-import { isValidResourceTypeSlug, SUBSCRIBABLE_EVENTS, type WorkOSEventName } from './constants.js';
+import {
+  isValidResourceTypeSlug,
+  SUBSCRIBABLE_EVENTS,
+  type WorkOSEventName,
+  MAX_ACCESS_TOKEN_TTL_SECONDS,
+} from './constants.js';
 import { AGENT_SESSION_SETTING_LIMITS } from './agent-sessions.js';
 import { normalizeEmail, type NormalizedEmail } from './helpers.js';
 import { isValidResourceUri, resourceUrisEqual } from './authkit-oauth.js';
@@ -1574,6 +1579,24 @@ export function validateSeedConfig(config: WorkOSSeedConfig): ConfigValidationRe
     } else {
       for (const problem of validateJwtTemplateContent(config.jwtTemplate.content)) {
         errors.push({ path: 'jwtTemplate.content', message: problem, value: config.jwtTemplate.content });
+      }
+    }
+  }
+
+  // The Sessions tab has no API, so a bad lifetime can only arrive by seed; checking it here
+  // means `--validate-config` reports it rather than the first sign-in minting with it.
+  if (config.sessionSettings !== undefined) {
+    const settings = config.sessionSettings;
+    if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
+      errors.push({ path: 'sessionSettings', message: 'must be an object', value: settings });
+    } else {
+      const ttl = settings.access_token_ttl_seconds;
+      if (ttl !== undefined && (!Number.isInteger(ttl) || ttl <= 0 || ttl > MAX_ACCESS_TOKEN_TTL_SECONDS)) {
+        errors.push({
+          path: 'sessionSettings.access_token_ttl_seconds',
+          message: `must be a positive integer of at most ${MAX_ACCESS_TOKEN_TTL_SECONDS} seconds`,
+          value: ttl,
+        });
       }
     }
   }

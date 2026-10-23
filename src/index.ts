@@ -40,6 +40,7 @@ export interface EmulatorSeedConfig {
   connectApplications?: WorkOSSeedConfig['connectApplications'];
   resourceIndicators?: WorkOSSeedConfig['resourceIndicators'];
   jwtTemplate?: WorkOSSeedConfig['jwtTemplate'];
+  sessionSettings?: WorkOSSeedConfig['sessionSettings'];
   featureFlags?: WorkOSSeedConfig['featureFlags'];
   directories?: WorkOSSeedConfig['directories'];
   agentBlueprints?: WorkOSSeedConfig['agentBlueprints'];

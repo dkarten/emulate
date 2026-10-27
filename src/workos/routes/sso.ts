@@ -71,6 +71,9 @@ interface SSOAuthorizeParams {
   domainHint: string | null;
   provider: string | null;
   email: string | null;
+  clientId: string | null;
+  codeChallenge: string | null;
+  codeChallengeMethod: string | null;
 }
 
 /** The connection a selector resolved to, with the selector's own words for an error about it. */
@@ -183,7 +186,7 @@ export function ssoRoutes(ctx: RouteContext): void {
   }
 
   function resolveAndRedirect(c: Context, params: SSOAuthorizeParams) {
-    const { redirectUri, state, email: loginHint } = params;
+    const { redirectUri, state, email: loginHint, clientId, codeChallenge, codeChallengeMethod } = params;
 
     assertAllowedRedirectUri(redirectUri, store);
 
@@ -241,6 +244,9 @@ export function ssoRoutes(ctx: RouteContext): void {
       profile_id: profile.id,
       redirect_uri: redirectUri,
       state,
+      client_id: clientId,
+      code_challenge: codeChallenge,
+      code_challenge_method: codeChallengeMethod,
       expires_at: expiresIn(SSO_CODE_TTL_MINUTES),
     });
 
@@ -277,6 +283,10 @@ export function ssoRoutes(ctx: RouteContext): void {
     const domainHint = url.searchParams.get('domain_hint');
     const provider = url.searchParams.get('provider');
     const loginHint = url.searchParams.get('login_hint');
+    // Set only when /user_management/authorize hands a connection- or organization-bound request
+    // here: production's standalone SSO endpoint takes no PKCE, and the SSO SDKs send none.
+    const codeChallenge = url.searchParams.get('code_challenge');
+    const codeChallengeMethod = url.searchParams.get('code_challenge_method');
 
     assertClientId(clientId);
 
@@ -297,6 +307,8 @@ export function ssoRoutes(ctx: RouteContext): void {
       if (organizationId) hiddenFields.organization = organizationId;
       if (domainHint) hiddenFields.domain_hint = domainHint;
       if (provider) hiddenFields.provider = provider;
+      if (codeChallenge) hiddenFields.code_challenge = codeChallenge;
+      if (codeChallengeMethod) hiddenFields.code_challenge_method = codeChallengeMethod;
 
       return c.html(
         renderLoginPage({
@@ -317,6 +329,9 @@ export function ssoRoutes(ctx: RouteContext): void {
       domainHint,
       provider,
       email: loginHint,
+      clientId,
+      codeChallenge,
+      codeChallengeMethod,
     });
   });
 
@@ -336,6 +351,9 @@ export function ssoRoutes(ctx: RouteContext): void {
       domainHint: (form.domain_hint as string) ?? null,
       provider: (form.provider as string) ?? null,
       email: (form.email as string) ?? null,
+      clientId: (form.client_id as string) ?? null,
+      codeChallenge: (form.code_challenge as string) ?? null,
+      codeChallengeMethod: (form.code_challenge_method as string) ?? null,
     });
   });
 
@@ -422,6 +440,32 @@ export function ssoRoutes(ctx: RouteContext): void {
         sso: {
           organization_id: auth.organization_id,
           connection_id: expiredProfile?.connection_id ?? null,
+          session_id: null,
+        },
+      });
+      throw error;
+    }
+
+    // A challenge on the record means /user_management/authorize started this authorization, and
+    // the code is AuthKit's to redeem: production's standalone token endpoint takes no
+    // `code_verifier`, so a code bound to one cannot be exchanged here at all. Refused without
+    // being spent, as /user_management/authenticate refuses a Connect code, so the callback the
+    // code was minted for can still redeem it.
+    if (auth.code_challenge) {
+      const boundProfile = ws.ssoProfiles.get(auth.profile_id);
+      const error = new OauthApiError(400, 'invalid_grant', `The code '${code}' has expired or is invalid.`);
+      emitAuthenticationEvent({
+        eventBus: store.getData<EventBus>(STORE_KEYS.eventBus),
+        method: 'SSO',
+        status: 'failed',
+        email: boundProfile?.email,
+        userId: findUserByEmail(ws, boundProfile?.email ?? '')?.id,
+        error: { code: error.code, message: error.message },
+        ipAddress: c.req.header('x-forwarded-for') ?? null,
+        userAgent: c.req.header('user-agent') ?? null,
+        sso: {
+          organization_id: auth.organization_id,
+          connection_id: auth.connection_id,
           session_id: null,
         },
       });

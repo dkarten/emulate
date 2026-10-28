@@ -1201,6 +1201,31 @@ export function assertActiveMember(ws: WorkOSStore, organizationId: string, user
   }
 }
 
+/**
+ * The account with a usable access token, or `undefined` when it needs reauthorization. Shared
+ * by `/token` and `/credentials`, which vend the same token in different envelopes.
+ */
+export function vendAccessToken(ws: WorkOSStore, account: WorkOSConnectedAccount): WorkOSConnectedAccount | undefined {
+  const expired = account.token_expires_at !== null && isExpired(account.token_expires_at);
+  if (account.state === 'connected' && expired && !account.refresh_token) {
+    // Production's refresh attempt fails on an unrefreshable token and flips the account;
+    // the collection hook emits reauthorization_needed.
+    account = ws.connectedAccounts.update(account.id, { state: 'needs_reauthorization' })!;
+  }
+  if (account.state !== 'connected') return undefined;
+
+  if (!account.access_token || expired) {
+    // A connected account always has a usable token. The emulator cannot reach the provider,
+    // so a refresh — or an account that was never given credentials — mints one locally, as
+    // the legacy code exchange does. Stored, so repeat calls return the same one.
+    account = ws.connectedAccounts.update(account.id, {
+      access_token: `di_mock_${account.provider}_${generateVerificationToken().slice(0, 8)}`,
+      token_expires_at: account.refresh_token ? expiresIn(60) : null,
+    })!;
+  }
+  return account;
+}
+
 /** Redirect URI hosts the emulator's authorize endpoints accept with no configuration. */
 export const DEFAULT_ALLOWED_REDIRECT_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 

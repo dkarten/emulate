@@ -288,7 +288,9 @@ emit the spec's `pipes.connected_account.connected` / `reauthorization_needed` /
 `disconnected` events, including for seeded accounts.
 
 `POST /data-integrations/{slug}/token` (the SDK's `pipes.getAccessToken`) resolves the account
-the same way and returns its access token with its scopes and expiry. Missing accounts return
+the same way and returns its access token with its scopes and expiry.
+`POST /data-integrations/{slug}/credentials` returns the same token as a `credential`, and with
+`connection_owner: organization` it returns the organization's token. Missing accounts return
 `not_installed`; accounts in `needs_reauthorization` return that. A `connected` account always
 yields a token: an imported one is returned verbatim while it is unexpired, and otherwise the
 emulator — which never contacts the real provider — mints a `di_mock_…` token in its place: an

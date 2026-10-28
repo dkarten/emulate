@@ -332,7 +332,7 @@ real requests the way the default key does.
 
 ## Pipes / Connected Apps
 
-User- and organization-owned connected-account CRUD and user access-token retrieval are supported; a
+User- and organization-owned connected-account CRUD and access-token retrieval are supported; a
 refresh mints a local `di_mock_` token rather than contacting the provider. The older
 `/pipes/connections` routes remain emulator-specific.
 
@@ -345,11 +345,19 @@ member's membership ends (`needs_reauthorization`,
 as it is. Deleting an organization deletes its accounts and its members' accounts scoped to it, each
 emitting `pipes.connected_account.disconnected`.
 
-| Request                                                                           | Outcome        |
-| --------------------------------------------------------------------------------- | -------------- |
-| Organization `POST` or `PUT` without `user_id`                                    | `422`          |
-| Organization `POST` or `PUT` whose `user_id` is not an active member              | `403`          |
-| Organization `POST` when the organization already has an account for the provider | `409 conflict` |
+`POST /data-integrations/{slug}/credentials` vends the token of the account `connection_owner`
+names: `user` by default, or `organization`, which needs `organization_id`. Without a usable account
+the answer is `{ "active": false }` with `error` `not_installed` or `needs_reauthorization`.
+`/token` serves user-owned accounts only: it ignores `connection_owner`, does not check membership,
+and answers a malformed body with `422`.
+
+| Request                                                                                                                  | Outcome                         |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| Organization `POST` or `PUT` without `user_id`                                                                           | `422`                           |
+| Organization `POST` or `PUT` whose `user_id` is not an active member                                                     | `403`                           |
+| Organization `POST` when the organization already has an account for the provider                                        | `409 conflict`                  |
+| `/credentials` with a malformed body                                                                                     | `400`, `"error": "Bad Request"` |
+| `/credentials` naming an organization the user is not an active member of, or resolving a personal account scoped to one | `403`                           |
 
 The multiple-connections contract (`connection_intent`, `connected_account_id`,
 `supports_multiple_connections`) is not implemented, and `account_display_name`,

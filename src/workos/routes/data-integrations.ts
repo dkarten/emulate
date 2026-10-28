@@ -1,5 +1,7 @@
+import type { Context } from 'hono';
 import {
   type RouteContext,
+  type WorkOSAppEnv,
   parseJsonBody,
   badRequest,
   WorkOSApiError,
@@ -7,6 +9,7 @@ import {
   validationError,
 } from '../../core/index.js';
 import { getWorkOSStore } from '../store.js';
+import { STORE_KEYS } from '../constants.js';
 import {
   assertActiveMember,
   assertAllowedRedirectUri,
@@ -14,10 +17,14 @@ import {
   expiresIn,
   isExpired,
   findConnectedAccount,
+  findExactConnectedAccount,
   findOrganizationConnectedAccount,
+  insertConnectedAccount,
+  liveMembershipFor,
   vendAccessToken,
 } from '../helpers.js';
-import type { ConnectionOwner, WorkOSUser } from '../entities.js';
+import { renderConnectPage, renderDeviceVerifyPage } from '../login-page.js';
+import type { ConnectionOwner, WorkOSDataIntegrationAuthorization, WorkOSUser } from '../entities.js';
 
 const CONNECTION_OWNERS: ConnectionOwner[] = ['user', 'organization'];
 
@@ -33,10 +40,10 @@ export function dataIntegrationRoutes(ctx: RouteContext): void {
   const ws = getWorkOSStore(store);
 
   /**
-   * The owner `/credentials` names in its body. Naming an organization, for
+   * The owner `/authorize` and `/credentials` name in their body. Naming an organization, for
    * either owner, requires the user to be an active member of it: the spec's 403 covers both an
    * organization connection and an organization-scoped personal one. A malformed body is the
-   * spec's 400 for this route, not the 422 `/token` answers.
+   * spec's 400 for these routes, not the 422 `/token` answers.
    */
   function resolveOwner(body: Record<string, unknown>): Owner {
     if (typeof body.user_id !== 'string' || !body.user_id) throw badRequest('user_id must be a string');
@@ -87,6 +94,130 @@ export function dataIntegrationRoutes(ctx: RouteContext): void {
     if (state) redirect.searchParams.set('state', state);
 
     return c.redirect(redirect.toString(), 302);
+  });
+
+  // The spec's authorize: returns a URL to send the browser to, which connects the account.
+  app.post('/data-integrations/:slug/authorize', async (c) => {
+    const slug = c.req.param('slug');
+    const body = await parseJsonBody(c);
+    const owner = resolveOwner(body);
+
+    if (body.return_to !== undefined && typeof body.return_to !== 'string') {
+      throw badRequest('return_to must be a URL address');
+    }
+    const returnTo = (body.return_to as string | undefined) ?? null;
+    if (returnTo) assertAllowedRedirectUri(returnTo, store);
+
+    const authorization = ws.dataIntegrationAuthorizations.insert({
+      slug,
+      token: generateVerificationToken(),
+      connection_owner: owner.connectionOwner,
+      user_id: owner.user.id,
+      organization_id: owner.organizationId,
+      return_to: returnTo,
+      expires_at: expiresIn(10),
+    });
+    return c.json({ url: `${ctx.baseUrl}/data-integrations/${authorization.token}/authorize-redirect` });
+  });
+
+  const AUTHORIZE_REDIRECT_PATH = '/data-integrations/:token/authorize-redirect';
+
+  /**
+   * The pending authorization a URL names, or `undefined` once it is used or expired. Deleting
+   * its user or organization deletes it too, so what it names still exists.
+   */
+  function pendingAuthorization(token: string): WorkOSDataIntegrationAuthorization | undefined {
+    const authorization = ws.dataIntegrationAuthorizations.findOneBy('token', token);
+    if (!authorization) return undefined;
+    if (isExpired(authorization.expires_at)) {
+      ws.dataIntegrationAuthorizations.delete(authorization.id);
+      return undefined;
+    }
+    return authorization;
+  }
+
+  const linkUnusable = (c: Context<WorkOSAppEnv>) =>
+    c.html(
+      renderDeviceVerifyPage({
+        title: 'Link expired',
+        message: 'This authorization link has expired or was already used. Start the connection again.',
+      }),
+      400,
+    );
+
+  /**
+   * Connect the account the authorization describes, as production does once the provider
+   * redirects back. Reconnecting an existing account starts it over as a fresh grant: the old
+   * tokens are dropped and `/credentials` mints a new one. A membership that ended after the
+   * URL was issued refuses the connect, as a revoked membership refuses a login code.
+   */
+  function connect(c: Context<WorkOSAppEnv>, authorization: WorkOSDataIntegrationAuthorization) {
+    ws.dataIntegrationAuthorizations.delete(authorization.id);
+    const { slug, user_id: userId, organization_id: organizationId } = authorization;
+    const organizationOwned = authorization.connection_owner === 'organization';
+
+    if (organizationId && liveMembershipFor(ws, organizationId, userId)?.status !== 'active') {
+      return c.html(
+        renderDeviceVerifyPage({
+          title: 'Not a member',
+          message: 'You are no longer an active member of the organization this connection is for.',
+        }),
+        403,
+      );
+    }
+
+    const existing = organizationOwned
+      ? findOrganizationConnectedAccount(ws, organizationId!, slug)
+      : findExactConnectedAccount(ws, userId, slug, organizationId);
+    const grant = {
+      state: 'connected' as const,
+      established_by_user_id: userId,
+      access_token: null,
+      refresh_token: null,
+      token_expires_at: null,
+    };
+    if (existing) {
+      ws.connectedAccounts.update(existing.id, grant);
+    } else {
+      insertConnectedAccount(ws, {
+        user_id: organizationOwned ? null : userId,
+        organization_id: organizationId,
+        provider: slug,
+        ...grant,
+      });
+    }
+
+    if (authorization.return_to) return c.redirect(authorization.return_to, 302);
+    return c.html(
+      renderDeviceVerifyPage({ title: 'Connected', message: `${slug} is connected. You can close this window.` }),
+    );
+  }
+
+  // Public: the browser lands here. `--interactive` asks first, standing in for the provider's consent screen.
+  app.get(AUTHORIZE_REDIRECT_PATH, (c) => {
+    const authorization = pendingAuthorization(c.req.param('token'));
+    if (!authorization) return linkUnusable(c);
+
+    if (store.getData<boolean>(STORE_KEYS.interactiveAuth)) {
+      const organization = authorization.organization_id
+        ? ws.organizations.get(authorization.organization_id)
+        : undefined;
+      return c.html(
+        renderConnectPage({
+          slug: authorization.slug,
+          email: ws.users.get(authorization.user_id)!.email,
+          organizationName: organization?.name,
+          formAction: new URL(c.req.url).pathname,
+        }),
+      );
+    }
+    return connect(c, authorization);
+  });
+
+  app.post(AUTHORIZE_REDIRECT_PATH, (c) => {
+    const authorization = pendingAuthorization(c.req.param('token'));
+    if (!authorization) return linkUnusable(c);
+    return connect(c, authorization);
   });
 
   // The spec's credential vend, for user- and organization-owned accounts alike.

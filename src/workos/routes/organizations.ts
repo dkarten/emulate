@@ -228,6 +228,7 @@ export function organizationRoutes(ctx: RouteContext): void {
     // As in the user cascade, each emits disconnected through the delete hook: the
     // organization's own accounts and its members' accounts scoped to it.
     ws.connectedAccounts.deleteBy('organization_id', org.id);
+    ws.dataIntegrationAuthorizations.deleteBy('organization_id', org.id);
     // Both kinds of key scoped to this org go with it — the org's own, and members' keys
     // issued inside it, which the membership deletion above has just left unbacked. Same
     // ownership test the org listing route applies, so nothing it would list survives.

@@ -1149,8 +1149,23 @@ export function findConnectedAccount(
 }
 
 /**
- * Inserts an OAuth connected account, the one auth method the import DTO and the seed
- * describe. Fires the `pipes.connected_account.*` event for its state.
+ * The account keyed by exactly (user, provider, organization scope), with `organization_id`
+ * matched rather than filtered: the key import answers 409 on and authorize connects.
+ */
+export function findExactConnectedAccount(
+  ws: WorkOSStore,
+  userId: string,
+  slug: string,
+  organizationId: string | null,
+): WorkOSConnectedAccount | undefined {
+  return ws.connectedAccounts
+    .findBy('user_id', userId)
+    .find((a) => a.provider === slug && a.organization_id === organizationId);
+}
+
+/**
+ * Inserts an OAuth connected account, the one auth method the import DTO, the seed and the
+ * authorize flow describe. Fires the `pipes.connected_account.*` event for its state.
  */
 export function insertConnectedAccount(
   ws: WorkOSStore,

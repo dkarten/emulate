@@ -11,6 +11,7 @@ import { getWorkOSStore, type WorkOSStore } from '../store.js';
 import {
   formatConnectedAccount,
   findConnectedAccount,
+  findExactConnectedAccount,
   insertConnectedAccount,
   findOrganizationConnectedAccount,
   assertActiveMember,
@@ -153,9 +154,7 @@ export function connectedAccountRoutes(ctx: RouteContext): void {
     if (organizationId && !ws.organizations.get(organizationId)) throw notFound('Organization', organizationId);
 
     const account = exact
-      ? ws.connectedAccounts
-          .findBy('user_id', user.id)
-          .find((a) => a.provider === slug && a.organization_id === (organizationId ?? null))
+      ? findExactConnectedAccount(ws, user.id, slug, organizationId ?? null)
       : findConnectedAccount(ws, user.id, slug, organizationId ?? null);
     return { userId: user.id, slug, organizationId: organizationId ?? null, account };
   }

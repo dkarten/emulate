@@ -46,6 +46,7 @@ import type {
   WorkOSConnectApplication,
   WorkOSClientSecret,
   WorkOSDataIntegrationAuth,
+  WorkOSDataIntegrationAuthorization,
   WorkOSRadarAttempt,
   WorkOSApiKey,
   WorkOSVaultObject,
@@ -102,6 +103,7 @@ export interface WorkOSStore {
   connectApplications: Collection<WorkOSConnectApplication>;
   clientSecrets: Collection<WorkOSClientSecret>;
   dataIntegrationAuths: Collection<WorkOSDataIntegrationAuth>;
+  dataIntegrationAuthorizations: Collection<WorkOSDataIntegrationAuthorization>;
   radarAttempts: Collection<WorkOSRadarAttempt>;
   apiKeyRecords: Collection<WorkOSApiKey>;
   vaultObjects: Collection<WorkOSVaultObject>;
@@ -274,6 +276,11 @@ export function getWorkOSStore(store: Store): WorkOSStore {
       'workos.data_integration_auths',
       ID_PREFIXES.data_integration_auth,
       ['code', 'slug'],
+    ),
+    dataIntegrationAuthorizations: store.collection<WorkOSDataIntegrationAuthorization>(
+      'workos.data_integration_authorizations',
+      ID_PREFIXES.data_integration_authorization,
+      ['token', 'user_id', 'organization_id'],
     ),
     radarAttempts: store.collection<WorkOSRadarAttempt>('workos.radar_attempts', ID_PREFIXES.radar_attempt, [
       'ip_address',

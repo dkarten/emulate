@@ -229,6 +229,9 @@ export function userRoutes(ctx: RouteContext): void {
     for (const ma of ws.magicAuths.findBy('user_id', user.id)) {
       ws.magicAuths.delete(ma.id);
     }
+    for (const authorization of ws.dataIntegrationAuthorizations.findBy('user_id', user.id)) {
+      ws.dataIntegrationAuthorizations.delete(authorization.id);
+    }
     // An organization's account outlives the member who established it; the field stops naming them.
     for (const ca of ws.connectedAccounts.findBy('established_by_user_id', user.id)) {
       ws.connectedAccounts.update(ca.id, { established_by_user_id: null });

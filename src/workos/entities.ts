@@ -453,9 +453,9 @@ export interface WorkOSConnectedAccount extends Entity {
   api_key_last_4: null;
   state: ConnectedAccountState;
   /**
-   * The member who established an organization's account: who imported it, or was seeded as
-   * establishing it. `null` for a user's own imported or seeded account, which is
-   * developer-managed, and once that member is deleted.
+   * The member who established the account: who connected it through an authorize URL, or who
+   * imported or was seeded as establishing an organization's account. `null` for a user's own
+   * imported or seeded account, which is developer-managed, and once that member is deleted.
    */
   established_by_user_id: string | null;
   /** Tokens the import/update endpoints were given. Kept because deleting the account is specified to remove them; never serialized. */
@@ -755,6 +755,20 @@ export interface WorkOSDataIntegrationAuth extends Entity {
   code: string;
   redirect_uri: string;
   state: string | null;
+  expires_at: string;
+}
+
+/**
+ * A pending `POST /data-integrations/{slug}/authorize`: the URL it returns carries `token`, and
+ * visiting that URL connects the account the request described.
+ */
+export interface WorkOSDataIntegrationAuthorization extends Entity {
+  slug: string;
+  token: string;
+  connection_owner: ConnectionOwner;
+  user_id: string;
+  organization_id: string | null;
+  return_to: string | null;
   expires_at: string;
 }
 

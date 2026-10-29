@@ -332,18 +332,24 @@ real requests the way the default key does.
 
 ## Pipes / Connected Apps
 
-User- and organization-owned connected-account CRUD and user access-token retrieval are supported;
-a refresh mints a local `di_mock_` token rather than contacting the provider. The older
+User- and organization-owned connected-account CRUD and user access-token retrieval are supported; a
+refresh mints a local `di_mock_` token rather than contacting the provider. The older
 `/pipes/connections` routes remain emulator-specific.
 
-An organization holds one account per provider, with `user_id: null`. `POST` and `PUT
-/organizations/{id}/connected_accounts/{slug}` take the acting member in `user_id` (`422` without
-one), who must be an active member of the organization (`403` otherwise); a second account for the
-same provider is `409 conflict`. `established_by_user_id` names the member who imported the account
-or was seeded as establishing it, and becomes `null` when that member is deleted. Unlike production,
-ending the membership neither clears the account's credentials nor sets `state_reason`. Deleting an
-organization deletes its accounts and its members' accounts scoped to it, each emitting
-`pipes.connected_account.disconnected`.
+An organization holds one account per provider, with `user_id: null`. `POST` and `PUT` on
+`/organizations/{id}/connected_accounts/{slug}` take the acting member in `user_id`.
+`established_by_user_id` names the member who imported the account or was seeded as establishing it,
+and becomes `null` when that member is deleted. Production invalidates the account when that
+member's membership ends (`needs_reauthorization`,
+`state_reason: establishing_member_membership_ended`, credentials cleared); the emulator leaves it
+as it is. Deleting an organization deletes its accounts and its members' accounts scoped to it, each
+emitting `pipes.connected_account.disconnected`.
+
+| Request                                                                           | Outcome        |
+| --------------------------------------------------------------------------------- | -------------- |
+| Organization `POST` or `PUT` without `user_id`                                    | `422`          |
+| Organization `POST` or `PUT` whose `user_id` is not an active member              | `403`          |
+| Organization `POST` when the organization already has an account for the provider | `409 conflict` |
 
 The multiple-connections contract (`connection_intent`, `connected_account_id`,
 `supports_multiple_connections`) is not implemented, and `account_display_name`,

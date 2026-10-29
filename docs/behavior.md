@@ -332,30 +332,22 @@ real requests the way the default key does.
 
 ## Pipes / Connected Apps
 
-User- and organization-owned connected-account CRUD and user access-token retrieval are supported:
-`/user_management/users/{id}/connected_accounts/{slug}`,
-`/organizations/{id}/connected_accounts/{slug}`, and `/data-integrations/{slug}/token`. A refresh
-mints a local `di_mock_` token rather than contacting the provider. The older `/pipes/connections`
-routes remain emulator-specific.
+User- and organization-owned connected-account CRUD and user access-token retrieval are supported;
+a refresh mints a local `di_mock_` token rather than contacting the provider. The older
+`/pipes/connections` routes remain emulator-specific.
 
-| Request                                                                            | Status | Code / body            |
-| ---------------------------------------------------------------------------------- | ------ | ---------------------- |
-| Organization `POST` or `PUT` without a `user_id`, or with one that is not a string | 422    | `unprocessable_entity` |
-| Organization `POST` or `PUT` with an unknown user, or an unknown organization      | 404    | `entity_not_found`     |
-| Organization `POST` or `PUT` whose `user_id` is not an active member               | 403    | `{ message }`          |
-| Organization `POST` when the organization already has an account for the slug      | 409    | `conflict`             |
-| Organization `GET`, `PUT` or `DELETE` with no account                              | 404    | `entity_not_found`     |
-
-An organization-owned account has `user_id: null`. `established_by_user_id` names the member who
-imported it or was seeded as establishing it. It is `null` for a user's own imported or seeded
-account, and becomes `null` when that member is deleted. Ending the member's membership does not
-clear the account's credentials or set `state_reason`, as production does. Deleting an organization
-deletes its accounts and its members' accounts scoped to it, and each emits
+An organization holds one account per provider, with `user_id: null`. `POST` and
+`PUT /organizations/{id}/connected_accounts/{slug}` take the acting member in `user_id` (`422`
+without one), who must be an active member of the organization (`403` otherwise); a second account
+for the same provider is `409 conflict`. `established_by_user_id` names the member who imported the
+account or was seeded as establishing it, and becomes `null` when that member is deleted. Ending
+the membership does not clear the account's credentials or set `state_reason`, as production does.
+Deleting an organization deletes its accounts and its members' accounts scoped to it, each emitting
 `pipes.connected_account.disconnected`.
 
-Each owner has one account per provider, so the multiple-connections contract
-(`connection_intent`, `connected_account_id`, `supports_multiple_connections`) is not implemented.
-`account_display_name`, `account_identifier`, `connection_role`, and `config` are not stored.
+The multiple-connections contract (`connection_intent`, `connected_account_id`,
+`supports_multiple_connections`) is not implemented, and `account_display_name`,
+`account_identifier`, `connection_role` and `config` are not stored.
 
 ## Applications
 

@@ -191,7 +191,10 @@ export function connectedAccountRoutes(ctx: RouteContext): void {
 
   app.put(ACCOUNT_PATH, async (c) => {
     const account = requireAccount(resolveTarget(c));
-    return c.json(formatConnectedAccount(updateAccount(ws, account, parseDto(await parseJsonBody(c)))));
+
+    const dto = parseDto(await parseJsonBody(c));
+    const updated = updateAccount(ws, account, dto);
+    return c.json(formatConnectedAccount(updated));
   });
 
   app.delete(ACCOUNT_PATH, (c) => {
@@ -271,7 +274,10 @@ export function connectedAccountRoutes(ctx: RouteContext): void {
     const body = await parseJsonBody(c);
     actingMember(body, target.organizationId);
     const account = requireOrganizationAccount(target);
-    return c.json(formatConnectedAccount(updateAccount(ws, account, parseDto(body))));
+
+    const dto = parseDto(body);
+    const updated = updateAccount(ws, account, dto);
+    return c.json(formatConnectedAccount(updated));
   });
 
   app.delete(ORGANIZATION_ACCOUNT_PATH, (c) => {

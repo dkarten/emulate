@@ -99,6 +99,9 @@ export function dataIntegrationRoutes(ctx: RouteContext): void {
         ? findOrganizationConnectedAccount(ws, owner.organizationId!, slug)
         : findConnectedAccount(ws, owner.user.id, slug, owner.organizationId);
     if (!account) return c.json({ active: false, error: 'not_installed' });
+    // A personal account scoped to an organization needs the membership even when the request
+    // leaves `organization_id` out and the account is the only one for the provider.
+    if (account.organization_id) assertActiveMember(ws, account.organization_id, owner.user.id);
 
     const vended = vendAccessToken(ws, account);
     if (!vended) return c.json({ active: false, error: 'needs_reauthorization' });

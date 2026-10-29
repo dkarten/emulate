@@ -383,6 +383,21 @@ describe('Data Integrations routes', () => {
       expect((await credentials({ user_id: outsider.id, organization_id: organizationId })).status).toBe(403);
     });
 
+    it('requires the membership of a scoped personal account the request does not name', async () => {
+      await req(
+        `/user_management/users/${userId}/connected_accounts/google-calendar?organization_id=${organizationId}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ access_token: 'ya29.scoped' }),
+        },
+      );
+      expect((await json(await credentials({ user_id: userId }))).active).toBe(true);
+
+      const memberships = await json(await req(`/user_management/organization_memberships?user_id=${userId}`));
+      await req(`/user_management/organization_memberships/${memberships.data[0].id}/deactivate`, { method: 'PUT' });
+      expect((await credentials({ user_id: userId })).status).toBe(403);
+    });
+
     it.each([
       [{}, 'user_id must be a string'],
       [

@@ -336,13 +336,13 @@ User- and organization-owned connected-account CRUD and user access-token retrie
 a refresh mints a local `di_mock_` token rather than contacting the provider. The older
 `/pipes/connections` routes remain emulator-specific.
 
-An organization holds one account per provider, with `user_id: null`. `POST` and
-`PUT /organizations/{id}/connected_accounts/{slug}` take the acting member in `user_id` (`422`
-without one), who must be an active member of the organization (`403` otherwise); a second account
-for the same provider is `409 conflict`. `established_by_user_id` names the member who imported the
-account or was seeded as establishing it, and becomes `null` when that member is deleted. Ending
-the membership does not clear the account's credentials or set `state_reason`, as production does.
-Deleting an organization deletes its accounts and its members' accounts scoped to it, each emitting
+An organization holds one account per provider, with `user_id: null`. `POST` and `PUT
+/organizations/{id}/connected_accounts/{slug}` take the acting member in `user_id` (`422` without
+one), who must be an active member of the organization (`403` otherwise); a second account for the
+same provider is `409 conflict`. `established_by_user_id` names the member who imported the account
+or was seeded as establishing it, and becomes `null` when that member is deleted. Unlike production,
+ending the membership neither clears the account's credentials nor sets `state_reason`. Deleting an
+organization deletes its accounts and its members' accounts scoped to it, each emitting
 `pipes.connected_account.disconnected`.
 
 The multiple-connections contract (`connection_intent`, `connected_account_id`,

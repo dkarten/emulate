@@ -535,6 +535,16 @@ describe('Connected account routes', () => {
       expect((await json(again)).code).toBe('conflict');
     });
 
+    it('creates one account from overlapping imports', async () => {
+      const statuses = await Promise.all(
+        ['ya29.a', 'ya29.b'].map(
+          async (token) => (await send('POST', { user_id: userId, access_token: token })).status,
+        ),
+      );
+      expect(statuses.sort()).toEqual([201, 409]);
+      expect(getWorkOSStore(store).connectedAccounts.all()).toHaveLength(1);
+    });
+
     it('requires the acting user to be an active member', async () => {
       const outsider = await createUser('outsider@acme.test');
       const missing = await send('POST', { access_token: 'ya29.org' });
@@ -563,11 +573,17 @@ describe('Connected account routes', () => {
       expect((await json(res)).message).toBe("Organization not found: 'org_missing'.");
     });
 
-    it('disconnects the organization’s accounts when it is deleted', async () => {
+    it('disconnects the organization’s accounts and its members’ scoped to it when it is deleted', async () => {
       await send('POST', { user_id: userId, access_token: 'ya29.org' });
+      await req(
+        `/user_management/users/${userId}/connected_accounts/google-calendar?organization_id=${organizationId}`,
+        { method: 'POST', body: JSON.stringify({ access_token: 'ya29.personal' }) },
+      );
+      expect(getWorkOSStore(store).connectedAccounts.all()).toHaveLength(2);
+
       expect((await req(`/organizations/${organizationId}`, { method: 'DELETE' })).status).toBe(204);
       expect(getWorkOSStore(store).connectedAccounts.all()).toHaveLength(0);
-      expect(eventsNamed('pipes.connected_account.disconnected')).toHaveLength(1);
+      expect(eventsNamed('pipes.connected_account.disconnected')).toHaveLength(2);
     });
   });
 });

@@ -249,9 +249,10 @@ export function connectedAccountRoutes(ctx: RouteContext): void {
     return c.json(formatConnectedAccount(account));
   });
 
+  // Both read the account after awaiting the body, so an overlapping request's write is seen.
   app.post(ORGANIZATION_ACCOUNT_PATH, async (c) => {
-    const { organizationId, slug, account } = resolveOrganizationTarget(c);
     const body = await parseJsonBody(c);
+    const { organizationId, slug, account } = resolveOrganizationTarget(c);
     const userId = actingMember(body, organizationId);
     if (account) {
       throw new WorkOSApiError(
@@ -273,8 +274,8 @@ export function connectedAccountRoutes(ctx: RouteContext): void {
   });
 
   app.put(ORGANIZATION_ACCOUNT_PATH, async (c) => {
-    const target = resolveOrganizationTarget(c);
     const body = await parseJsonBody(c);
+    const target = resolveOrganizationTarget(c);
     actingMember(body, target.organizationId);
     const account = requireOrganizationAccount(target);
 

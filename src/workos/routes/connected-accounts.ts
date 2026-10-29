@@ -82,6 +82,19 @@ function deriveState(dto: ConnectedAccountDto): ConnectedAccountState {
   throw validationError('a state or at least one token is required');
 }
 
+/** POST on either path: the account fields an import takes from its DTO. */
+function importedFields(
+  dto: ConnectedAccountDto,
+): Pick<WorkOSConnectedAccount, 'scopes' | 'state' | 'access_token' | 'refresh_token' | 'token_expires_at'> {
+  return {
+    scopes: dto.scopes ?? [],
+    state: deriveState(dto),
+    access_token: dto.access_token ?? null,
+    refresh_token: dto.refresh_token ?? null,
+    token_expires_at: dto.expires_at ?? null,
+  };
+}
+
 /** PUT on either path: merge the DTO into the account, re-deriving its state as described inline. */
 function updateAccount(
   ws: WorkOSStore,
@@ -173,18 +186,12 @@ export function connectedAccountRoutes(ctx: RouteContext): void {
     }
 
     const dto = parseDto(await parseJsonBody(c));
-    const state = deriveState(dto);
-
     const created = insertConnectedAccount(ws, {
       user_id: userId,
       organization_id: organizationId,
       provider: slug,
-      scopes: dto.scopes ?? [],
-      state,
       established_by_user_id: null,
-      access_token: dto.access_token ?? null,
-      refresh_token: dto.refresh_token ?? null,
-      token_expires_at: dto.expires_at ?? null,
+      ...importedFields(dto),
     });
     return c.json(formatConnectedAccount(created), 201);
   });
@@ -259,12 +266,8 @@ export function connectedAccountRoutes(ctx: RouteContext): void {
       user_id: null,
       organization_id: organizationId,
       provider: slug,
-      scopes: dto.scopes ?? [],
-      state: deriveState(dto),
       established_by_user_id: userId,
-      access_token: dto.access_token ?? null,
-      refresh_token: dto.refresh_token ?? null,
-      token_expires_at: dto.expires_at ?? null,
+      ...importedFields(dto),
     });
     return c.json(formatConnectedAccount(created), 201);
   });

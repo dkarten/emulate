@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, setSystemTime } from 'bun:test';
 import { ConflictException } from '@workos-inc/node';
 import { createServer, type ApiKeyMap } from '../../core/index.js';
 import { workosPlugin, seedFromConfig } from '../index.js';
@@ -538,6 +538,40 @@ describe('Data Integrations routes', () => {
 
       expect((await visit(url)).status).toBe(400);
       expect((await app.request('/data-integrations/nope/authorize-redirect')).status).toBe(400);
+    });
+
+    it('expires a link after 10 minutes, and sweeps unvisited expired links on the next one', async () => {
+      const now = Date.now();
+      try {
+        const visited = await authorizeUrl(organizationOwner());
+        await authorizeUrl(organizationOwner());
+        setSystemTime(now + 10 * 60_000 + 1_000);
+        expect((await visit(visited)).status).toBe(400);
+
+        await authorizeUrl(organizationOwner());
+        expect(getWorkOSStore(store).dataIntegrationAuthorizations.all()).toHaveLength(1);
+      } finally {
+        setSystemTime();
+      }
+    });
+
+    it('drops the stored tokens when an account is reconnected', async () => {
+      await post(`/organizations/${organizationId}/connected_accounts/google-calendar`, {
+        user_id: userId,
+        access_token: 'ya29.old',
+      });
+      expect((await json(await credentials(organizationOwner()))).credential.value).toBe('ya29.old');
+
+      await visit(await authorizeUrl(organizationOwner()));
+      const { credential } = await json(await credentials(organizationOwner()));
+      expect(credential.value).toMatch(/^di_mock_google-calendar_/);
+    });
+
+    it('percent-encodes the return_to it redirects to', async () => {
+      const landed = await visit(
+        await authorizeUrl({ ...organizationOwner(), return_to: 'http://localhost:3000/done?x=a b' }),
+      );
+      expect(landed.headers.get('Location')).toBe('http://localhost:3000/done?x=a%20b');
     });
 
     it('refuses a link whose membership ended before it was visited', async () => {

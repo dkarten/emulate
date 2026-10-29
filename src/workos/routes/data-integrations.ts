@@ -108,6 +108,10 @@ export function dataIntegrationRoutes(ctx: RouteContext): void {
     const returnTo = (body.return_to as string | undefined) ?? null;
     if (returnTo) assertAllowedRedirectUri(returnTo, store);
 
+    // An unvisited link is only dropped once it is opened, so sweep the user's expired ones here.
+    for (const stale of ws.dataIntegrationAuthorizations.findBy('user_id', owner.user.id)) {
+      if (isExpired(stale.expires_at)) ws.dataIntegrationAuthorizations.delete(stale.id);
+    }
     const authorization = ws.dataIntegrationAuthorizations.insert({
       slug,
       token: generateVerificationToken(),
@@ -187,7 +191,9 @@ export function dataIntegrationRoutes(ctx: RouteContext): void {
       });
     }
 
-    if (authorization.return_to) return c.redirect(authorization.return_to, 302);
+    // Re-serialized rather than echoed, as `/user_management/sessions/logout` does: a space is a
+    // legal `return_to` character but not a legal `Location` one.
+    if (authorization.return_to) return c.redirect(new URL(authorization.return_to).toString(), 302);
     return c.html(
       renderDeviceVerifyPage({ title: 'Connected', message: `${slug} is connected. You can close this window.` }),
     );

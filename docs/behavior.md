@@ -351,13 +351,14 @@ the answer is `{ "active": false }` with `error` `not_installed` or `needs_reaut
 `/token` serves user-owned accounts only: it ignores `connection_owner`, does not check membership,
 and answers a malformed body with `422`.
 
-| Request                                                                                                                  | Outcome                         |
-| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
-| Organization `POST` or `PUT` without `user_id`                                                                           | `422`                           |
-| Organization `POST` or `PUT` whose `user_id` is not an active member                                                     | `403`                           |
-| Organization `POST` when the organization already has an account for the provider                                        | `409 conflict`                  |
-| `/credentials` with a malformed body                                                                                     | `400`, `"error": "Bad Request"` |
-| `/credentials` naming an organization the user is not an active member of, or resolving a personal account scoped to one | `403`                           |
+| Request                                                                                                   | Outcome                         |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| Organization `POST` or `PUT` without `user_id`                                                            | `422`                           |
+| Organization `POST` or `PUT` whose `user_id` is not an active member                                      | `403`                           |
+| Organization `POST` when the organization already has an account for the provider                         | `409 conflict`                  |
+| `/credentials` with a malformed body                                                                      | `400`, `"error": "Bad Request"` |
+| `/credentials` naming an organization the user is not an active member of                                 | `403`                           |
+| `/credentials` resolving a personal account scoped to an organization the user is not an active member of | `403`                           |
 
 The multiple-connections contract (`connection_intent`, `connected_account_id`,
 `supports_multiple_connections`) is not implemented, and `account_display_name`,

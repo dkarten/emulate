@@ -615,6 +615,22 @@ describe('Data Integrations routes', () => {
       expect(getWorkOSStore(store).connectedAccounts.all()).toHaveLength(1);
     });
 
+    it('refuses a former member under --interactive, before and after the Allow page', async () => {
+      store.setData(STORE_KEYS.interactiveAuth, true);
+      const shown = await authorizeUrl(organizationOwner());
+      expect((await visit(shown)).status).toBe(200);
+      const unopened = await authorizeUrl(organizationOwner());
+
+      const membership = getWorkOSStore(store).organizationMemberships.findOneBy('user_id', userId)!;
+      await req(`/user_management/organization_memberships/${membership.id}`, { method: 'DELETE' });
+
+      const refused = await visit(unopened);
+      expect(refused.status).toBe(403);
+      expect(await refused.text()).not.toContain('Connect google-calendar');
+      expect((await visit(shown, { method: 'POST' })).status).toBe(403);
+      expect(getWorkOSStore(store).connectedAccounts.all()).toHaveLength(0);
+    });
+
     it('connects a user’s own account, read back through the SDK', async () => {
       const workos = sdkClient(app, 'sk_test_org');
       const { url } = await workos.pipes.authorizeDataIntegration({

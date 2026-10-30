@@ -150,25 +150,33 @@ export function dataIntegrationRoutes(ctx: RouteContext): void {
     );
 
   /**
+   * A membership that ended after the URL was issued refuses it, as a revoked membership refuses
+   * a login code. Both handlers check before anything else, so `--interactive` never offers the
+   * Allow page to a former member.
+   */
+  const membershipEnded = ({ organization_id: organizationId, user_id: userId }: WorkOSDataIntegrationAuthorization) =>
+    organizationId !== null && liveMembershipFor(ws, organizationId, userId)?.status !== 'active';
+
+  function refuseFormerMember(c: Context<WorkOSAppEnv>, authorization: WorkOSDataIntegrationAuthorization) {
+    ws.dataIntegrationAuthorizations.delete(authorization.id);
+    return c.html(
+      renderDeviceVerifyPage({
+        title: 'Not a member',
+        message: 'You are no longer an active member of the organization this connection is for.',
+      }),
+      403,
+    );
+  }
+
+  /**
    * Connect the account the authorization describes, as production does once the provider
    * redirects back. Reconnecting an existing account starts it over as a fresh grant: the old
-   * tokens are dropped and `/credentials` mints a new one. A membership that ended after the
-   * URL was issued refuses the connect, as a revoked membership refuses a login code.
+   * tokens are dropped and `/credentials` mints a new one.
    */
   function connect(c: Context<WorkOSAppEnv>, authorization: WorkOSDataIntegrationAuthorization) {
     ws.dataIntegrationAuthorizations.delete(authorization.id);
     const { slug, user_id: userId, organization_id: organizationId } = authorization;
     const organizationOwned = authorization.connection_owner === 'organization';
-
-    if (organizationId && liveMembershipFor(ws, organizationId, userId)?.status !== 'active') {
-      return c.html(
-        renderDeviceVerifyPage({
-          title: 'Not a member',
-          message: 'You are no longer an active member of the organization this connection is for.',
-        }),
-        403,
-      );
-    }
 
     const existing = organizationOwned
       ? findOrganizationConnectedAccount(ws, organizationId!, slug)
@@ -203,6 +211,7 @@ export function dataIntegrationRoutes(ctx: RouteContext): void {
   app.get(AUTHORIZE_REDIRECT_PATH, (c) => {
     const authorization = pendingAuthorization(c.req.param('token'));
     if (!authorization) return linkUnusable(c);
+    if (membershipEnded(authorization)) return refuseFormerMember(c, authorization);
 
     if (store.getData<boolean>(STORE_KEYS.interactiveAuth)) {
       const organization = authorization.organization_id
@@ -223,6 +232,7 @@ export function dataIntegrationRoutes(ctx: RouteContext): void {
   app.post(AUTHORIZE_REDIRECT_PATH, (c) => {
     const authorization = pendingAuthorization(c.req.param('token'));
     if (!authorization) return linkUnusable(c);
+    if (membershipEnded(authorization)) return refuseFormerMember(c, authorization);
     return connect(c, authorization);
   });
 

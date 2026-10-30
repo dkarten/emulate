@@ -366,7 +366,7 @@ describe('Data Integrations routes', () => {
 
       const workos = sdkClient(app, 'sk_test_org');
       const vended = await workos.pipes.createDataIntegrationCredential({ slug: 'google-calendar', userId });
-      expect(vended.active).toBe(true);
+      expect(vended).toMatchObject({ active: true, credential: { authMethod: 'oauth', value: 'ya29.personal' } });
       expect(await json(await credentials(organizationOwner()))).toEqual({ active: false, error: 'not_installed' });
     });
 
